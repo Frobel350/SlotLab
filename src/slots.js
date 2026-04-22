@@ -4,7 +4,7 @@ export async function fetchSlots() {
 
 const s = (name, provider, volatility, max_win, rtp, theme, slug, providerSlug) => ({
   name, provider, volatility, max_win, rtp, emoji: '🎰', theme,
-  image: `https://cdn2.softswiss.net/i/s3/${providerSlug}/${slug}.png`
+  image: `https://cdn.casinogrounds.com/uploads/games/${slug}.jpg`
 })
 
 const pp = (name, slug, vol = "High", mw = 5000, rtp = 96.50, theme = "Various") =>
