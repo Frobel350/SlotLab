@@ -11,12 +11,22 @@ function VolBadge({ v }) {
 }
 
 function SlotImage({ slot, size = 40 }) {
-  const [err, setErr] = useState(false)
-  if (slot.image && !err) {
-    return <img src={slot.image} alt={slot.name} onError={() => setErr(true)}
-      style={{ width: size, height: size, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
-  }
-  return <span style={{ fontSize: size * 0.55, width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>🎰</span>
+  const [src, setSrc] = useState(
+    `https://img.google.com/s2/favicons?domain=pragmaticplay.com&sz=${size}`
+  )
+  const googleImg = `https://www.google.com/search?q=${encodeURIComponent(slot.name + ' slot')}&tbm=isch`
+  
+  return (
+    <div style={{ 
+      width: size, height: size, borderRadius: 6, flexShrink: 0,
+      background: 'linear-gradient(135deg, rgba(255,190,0,0.2), rgba(255,149,0,0.1))',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.45, fontWeight: 700, color: '#ffbe00',
+      border: '1px solid rgba(255,190,0,0.2)', fontFamily: "'DM Sans', sans-serif"
+    }}>
+      {slot.name.charAt(0).toUpperCase()}
+    </div>
+  )
 }
 
 function AuthScreen({ onAuth }) {
