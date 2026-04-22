@@ -1,13 +1,22 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
-import { SLOTS_DATA, PROVIDERS, VOLATILITIES, THEMES } from './slots'
+import { fetchSlots } from './slots'
 
 const fmt = (n, d = 2) => (n ?? 0).toFixed(d)
 const fmtK = n => n >= 1000 ? `${(n / 1000).toFixed(0)}K` : n
 
 function VolBadge({ v }) {
-  const cls = v === 'Very High' ? 'badge-vhigh' : v === 'High' ? 'badge-high' : v === 'Medium' ? 'badge-medium' : 'badge-low'
+  const cls = v === 'Very High' || v === 'Very high' ? 'badge-vhigh' : v === 'High' ? 'badge-high' : v === 'Medium' ? 'badge-medium' : 'badge-low'
   return <span className={`badge ${cls}`}>{v}</span>
+}
+
+function SlotImage({ slot, size = 40 }) {
+  const [err, setErr] = useState(false)
+  if (slot.image && !err) {
+    return <img src={slot.image} alt={slot.name} onError={() => setErr(true)}
+      style={{ width: size, height: size, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+  }
+  return <span style={{ fontSize: size * 0.55, width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>🎰</span>
 }
 
 function AuthScreen({ onAuth }) {
@@ -28,7 +37,7 @@ function AuthScreen({ onAuth }) {
       } else {
         const { error } = await supabase.auth.signUp({ email, password })
         if (error) throw error
-        setSuccess('Conta criada! Verifica o teu email para confirmar.')
+        setSuccess('Conta criada! Já podes entrar.')
       }
     } catch (e) { setError(e.message) }
     setLoading(false)
@@ -61,14 +70,17 @@ function AuthScreen({ onAuth }) {
   )
 }
 
-function RandomizerTab() {
+function RandomizerTab({ slots, slotsLoading }) {
   const [filters, setFilters] = useState({ provider: '', volatility: '', theme: '', minMaxWin: '', maxMaxWin: '' })
   const [result, setResult] = useState(null)
   const [spinning, setSpinning] = useState(false)
 
-  const pool = SLOTS_DATA.filter(s => {
+  const providers = [...new Set(slots.map(s => s.provider))].sort()
+  const themes = [...new Set(slots.map(s => s.theme).filter(Boolean))].sort()
+
+  const pool = slots.filter(s => {
     if (filters.provider && s.provider !== filters.provider) return false
-    if (filters.volatility && s.volatility !== filters.volatility) return false
+    if (filters.volatility && s.volatility?.toLowerCase() !== filters.volatility.toLowerCase()) return false
     if (filters.theme && s.theme !== filters.theme) return false
     if (filters.minMaxWin && s.max_win < parseInt(filters.minMaxWin)) return false
     if (filters.maxMaxWin && s.max_win > parseInt(filters.maxMaxWin)) return false
@@ -88,7 +100,7 @@ function RandomizerTab() {
       <div className="page-header">
         <div>
           <div className="section-title">🎰 Slot Randomizer</div>
-          <div className="section-sub">{SLOTS_DATA.length} slots disponíveis — filtra e sorteia</div>
+          <div className="section-sub">{slotsLoading ? 'A carregar slots...' : `${slots.length} slots disponíveis — filtra e sorteia`}</div>
         </div>
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
@@ -96,22 +108,25 @@ function RandomizerTab() {
           <div className="filter-group">
             <label>Provedor</label>
             <select className="filter-select" value={filters.provider} onChange={e => setF('provider', e.target.value)}>
-              <option value="">Todos ({PROVIDERS.length})</option>
-              {PROVIDERS.map(p => <option key={p}>{p}</option>)}
+              <option value="">Todos ({providers.length})</option>
+              {providers.map(p => <option key={p}>{p}</option>)}
             </select>
           </div>
           <div className="filter-group">
             <label>Volatilidade</label>
             <select className="filter-select" value={filters.volatility} onChange={e => setF('volatility', e.target.value)}>
               <option value="">Todas</option>
-              {VOLATILITIES.map(v => <option key={v}>{v}</option>)}
+              <option>Low</option>
+              <option>Medium</option>
+              <option>High</option>
+              <option>Very high</option>
             </select>
           </div>
           <div className="filter-group">
             <label>Tema</label>
             <select className="filter-select" value={filters.theme} onChange={e => setF('theme', e.target.value)}>
               <option value="">Todos</option>
-              {THEMES.map(t => <option key={t}>{t}</option>)}
+              {themes.map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
           <div className="filter-group">
@@ -124,13 +139,16 @@ function RandomizerTab() {
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>{pool.length} slot{pool.length !== 1 ? 's' : ''} na pool</div>
-        <button className="spin-btn" onClick={spin} disabled={spinning || !pool.length}>
+        <button className="spin-btn" onClick={spin} disabled={spinning || !pool.length || slotsLoading}>
           {spinning ? 'A SORTEAR...' : '🎲 SORTEAR SLOT ALEATÓRIA'}
         </button>
       </div>
+
       {result && (
         <div className="result-card">
-          <span className="result-emoji">{result.emoji}</span>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+            <SlotImage slot={result} size={80} />
+          </div>
           <div className="result-name">{result.name}</div>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>{result.provider}</div>
           <div className="result-pills">
@@ -141,25 +159,30 @@ function RandomizerTab() {
           </div>
         </div>
       )}
+
       <div className="card">
         <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--muted)', marginBottom: 14 }}>Pool ({pool.length})</div>
-        <div className="slots-grid">
-          {pool.map((s, i) => (
-            <div key={i} className="slot-card">
-              <span style={{ fontSize: 20 }}>{s.emoji}</span>
-              <div style={{ minWidth: 0 }}>
-                <div className="slot-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
-                <div className="slot-meta">{s.provider} · {fmtK(s.max_win)}x</div>
+        {slotsLoading ? (
+          <div className="empty-state"><span className="loading-pulse">A carregar slots da API...</span></div>
+        ) : (
+          <div className="slots-grid">
+            {pool.slice(0, 200).map((s, i) => (
+              <div key={i} className="slot-card">
+                <SlotImage slot={s} size={36} />
+                <div style={{ minWidth: 0 }}>
+                  <div className="slot-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
+                  <div className="slot-meta">{s.provider} · {fmtK(s.max_win)}x</div>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-function BonusHuntTab({ user }) {
+function BonusHuntTab({ user, slots }) {
   const [hunts, setHunts] = useState([])
   const [activeIdx, setActiveIdx] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -168,6 +191,7 @@ function BonusHuntTab({ user }) {
   const [newSlot, setNewSlot] = useState({ slotIdx: 0, betSize: '1' })
   const [newHuntForm, setNewHuntForm] = useState({ name: '', startBalance: '500' })
   const [saving, setSaving] = useState(false)
+  const [search, setSearch] = useState('')
 
   useEffect(() => { loadHunts() }, [user])
 
@@ -185,11 +209,12 @@ function BonusHuntTab({ user }) {
   }
 
   const addEntry = async () => {
-    const slot = SLOTS_DATA[parseInt(newSlot.slotIdx)]
+    const slot = filteredSlots[parseInt(newSlot.slotIdx)]
+    if (!slot) return
     const hunt = hunts[activeIdx]
     setSaving(true)
-    await supabase.from('hunt_entries').insert({ hunt_id: hunt.id, slot_name: slot.name, slot_emoji: slot.emoji, slot_provider: slot.provider, slot_volatility: slot.volatility, bet_size: parseFloat(newSlot.betSize), opened: false })
-    await loadHunts(); setSaving(false); setShowAdd(false)
+    await supabase.from('hunt_entries').insert({ hunt_id: hunt.id, slot_name: slot.name, slot_emoji: slot.emoji, slot_provider: slot.provider, slot_volatility: slot.volatility, slot_image: slot.image || null, bet_size: parseFloat(newSlot.betSize), opened: false })
+    await loadHunts(); setSaving(false); setShowAdd(false); setSearch('')
   }
 
   const updateMultiplier = async (entryId, val) => {
@@ -206,6 +231,8 @@ function BonusHuntTab({ user }) {
     await supabase.from('hunt_entries').delete().eq('id', entryId)
     setHunts(hs => hs.map(h => ({ ...h, hunt_entries: h.hunt_entries.filter(e => e.id !== entryId) })))
   }
+
+  const filteredSlots = slots.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.provider.toLowerCase().includes(search.toLowerCase()))
 
   const hunt = hunts[activeIdx]
   const entries = hunt?.hunt_entries || []
@@ -266,7 +293,9 @@ function BonusHuntTab({ user }) {
                       <tr key={e.id} style={{ opacity: e.opened ? 0.65 : 1 }}>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 18 }}>{e.slot_emoji || '🎰'}</span>
+                            {e.slot_image
+                              ? <img src={e.slot_image} alt={e.slot_name} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} onError={ev => ev.target.style.display = 'none'} />
+                              : <span style={{ fontSize: 22 }}>🎰</span>}
                             <div><div style={{ fontWeight: 500 }}>{e.slot_name}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.slot_provider}</div></div>
                           </div>
                         </td>
@@ -306,9 +335,13 @@ function BonusHuntTab({ user }) {
           <div className="modal">
             <h3>Adicionar Slot</h3>
             <div className="form-group">
-              <label className="form-label">Slot</label>
+              <label className="form-label">Pesquisar</label>
+              <input className="form-input" placeholder="Nome da slot ou provedor..." value={search} onChange={e => { setSearch(e.target.value); setNewSlot(s => ({ ...s, slotIdx: 0 })) }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Slot ({filteredSlots.length})</label>
               <select className="filter-select" style={{ width: '100%' }} value={newSlot.slotIdx} onChange={e => setNewSlot(s => ({ ...s, slotIdx: e.target.value }))}>
-                {SLOTS_DATA.map((s, i) => <option key={i} value={i}>{s.emoji} {s.name} — {s.provider}</option>)}
+                {filteredSlots.slice(0, 100).map((s, i) => <option key={i} value={i}>{s.name} — {s.provider}</option>)}
               </select>
             </div>
             <div className="form-group"><label className="form-label">Bet Size (€)</label><input className="form-input" type="number" step="0.1" value={newSlot.betSize} onChange={e => setNewSlot(s => ({ ...s, betSize: e.target.value }))} /></div>
@@ -323,7 +356,7 @@ function BonusHuntTab({ user }) {
   )
 }
 
-function OpeningsTab({ user }) {
+function OpeningsTab({ user, slots }) {
   const [sessions, setSessions] = useState([])
   const [activeIdx, setActiveIdx] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -332,6 +365,7 @@ function OpeningsTab({ user }) {
   const [newOpening, setNewOpening] = useState({ slotIdx: 0, multiplier: '' })
   const [newSession, setNewSession] = useState({ startBalance: '300', betSize: '1' })
   const [saving, setSaving] = useState(false)
+  const [search, setSearch] = useState('')
 
   useEffect(() => { loadSessions() }, [user])
 
@@ -348,13 +382,16 @@ function OpeningsTab({ user }) {
     await loadSessions(); setActiveIdx(0); setSaving(false); setShowNewSession(false)
   }
 
+  const filteredSlots = slots.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.provider.toLowerCase().includes(search.toLowerCase()))
+
   const addOpening = async () => {
     if (!newOpening.multiplier) return
-    const slot = SLOTS_DATA[parseInt(newOpening.slotIdx)]
+    const slot = filteredSlots[parseInt(newOpening.slotIdx)]
+    if (!slot) return
     const session = sessions[activeIdx]
     setSaving(true)
-    await supabase.from('openings').insert({ session_id: session.id, slot_name: slot.name, slot_emoji: slot.emoji, slot_provider: slot.provider, slot_volatility: slot.volatility, multiplier: parseFloat(newOpening.multiplier) })
-    await loadSessions(); setSaving(false); setShowAdd(false); setNewOpening({ slotIdx: 0, multiplier: '' })
+    await supabase.from('openings').insert({ session_id: session.id, slot_name: slot.name, slot_emoji: slot.emoji, slot_provider: slot.provider, slot_volatility: slot.volatility, slot_image: slot.image || null, multiplier: parseFloat(newOpening.multiplier) })
+    await loadSessions(); setSaving(false); setShowAdd(false); setNewOpening({ slotIdx: 0, multiplier: '' }); setSearch('')
   }
 
   const removeOpening = async (id) => {
@@ -416,7 +453,9 @@ function OpeningsTab({ user }) {
                         <td style={{ color: 'var(--muted)', fontSize: 12 }}>{idx + 1}</td>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 18 }}>{o.slot_emoji || '🎰'}</span>
+                            {o.slot_image
+                              ? <img src={o.slot_image} alt={o.slot_name} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} onError={ev => ev.target.style.display = 'none'} />
+                              : <span style={{ fontSize: 22 }}>🎰</span>}
                             <div>
                               <div style={{ fontWeight: 500 }}>{o.slot_name}</div>
                               {best?.id === o.id && <span style={{ fontSize: 10, color: 'var(--gold)' }}>⭐ BEST</span>}
@@ -455,9 +494,13 @@ function OpeningsTab({ user }) {
           <div className="modal">
             <h3>Registar Opening</h3>
             <div className="form-group">
+              <label className="form-label">Pesquisar</label>
+              <input className="form-input" placeholder="Nome da slot ou provedor..." value={search} onChange={e => { setSearch(e.target.value); setNewOpening(s => ({ ...s, slotIdx: 0 })) }} />
+            </div>
+            <div className="form-group">
               <label className="form-label">Slot</label>
               <select className="filter-select" style={{ width: '100%' }} value={newOpening.slotIdx} onChange={e => setNewOpening(s => ({ ...s, slotIdx: e.target.value }))}>
-                {SLOTS_DATA.map((s, i) => <option key={i} value={i}>{s.emoji} {s.name} — {s.provider}</option>)}
+                {filteredSlots.slice(0, 100).map((s, i) => <option key={i} value={i}>{s.name} — {s.provider}</option>)}
               </select>
             </div>
             <div className="form-group"><label className="form-label">Multiplicador (x)</label><input className="form-input" type="number" step="0.1" placeholder="ex: 45.5" value={newOpening.multiplier} onChange={e => setNewOpening(s => ({ ...s, multiplier: e.target.value }))} /></div>
@@ -472,7 +515,7 @@ function OpeningsTab({ user }) {
   )
 }
 
-function TournamentTab({ user }) {
+function TournamentTab({ user, slots }) {
   const [tournaments, setTournaments] = useState([])
   const [activeIdx, setActiveIdx] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -480,6 +523,7 @@ function TournamentTab({ user }) {
   const [size, setSize] = useState(8)
   const [tournamentName, setTournamentName] = useState('')
   const [editingPos, setEditingPos] = useState(null)
+  const [search, setSearch] = useState('')
 
   useEffect(() => { loadTournaments() }, [user])
 
@@ -504,17 +548,17 @@ function TournamentTab({ user }) {
 
   const randomize = () => {
     const t = tournaments[activeIdx]
-    const shuffled = [...SLOTS_DATA].sort(() => Math.random() - 0.5).slice(0, t.size)
+    const shuffled = [...slots].sort(() => Math.random() - 0.5).slice(0, t.size)
     const assignments = {}
-    shuffled.forEach((s, i) => { assignments[i] = { name: s.name, emoji: s.emoji } })
+    shuffled.forEach((s, i) => { assignments[i] = { name: s.name, emoji: s.emoji, image: s.image } })
     updateBracket({ assignments, scores: {} })
   }
 
   const assignSlot = (pos, slot) => {
     const t = tournaments[activeIdx]
-    const assignments = { ...(t.bracket?.assignments || {}), [pos]: { name: slot.name, emoji: slot.emoji } }
+    const assignments = { ...(t.bracket?.assignments || {}), [pos]: { name: slot.name, emoji: slot.emoji, image: slot.image } }
     updateBracket({ assignments })
-    setEditingPos(null)
+    setEditingPos(null); setSearch('')
   }
 
   const setWinner = (key, player) => {
@@ -522,6 +566,8 @@ function TournamentTab({ user }) {
     const scores = { ...(t.bracket?.scores || {}), [key]: player }
     updateBracket({ scores })
   }
+
+  const filteredSlots = slots.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.provider.toLowerCase().includes(search.toLowerCase()))
 
   if (loading) return <div className="page"><p className="loading-pulse">A carregar torneios...</p></div>
 
@@ -540,6 +586,10 @@ function TournamentTab({ user }) {
       if (!w) return null
       return getP(rIdx - 1, mIdx * 2 + pIdx, w === 'p1' ? 0 : 1)
     }
+
+    const SlotThumb = ({ slot }) => slot?.image
+      ? <img src={slot.image} alt={slot.name} style={{ width: 24, height: 24, objectFit: 'cover', borderRadius: 4 }} onError={ev => ev.target.replaceWith(Object.assign(document.createElement('span'), { textContent: '🎰' }))} />
+      : <span style={{ fontSize: 16 }}>🎰</span>
 
     return (
       <div className="bracket-wrap">
@@ -568,7 +618,7 @@ function TournamentTab({ user }) {
                                 if (!slot && rIdx === 0) setEditingPos(mIdx * 2 + pi)
                                 else if (!winner && slot) setWinner(key, player)
                               }}>
-                              <span style={{ fontSize: 16 }}>{slot?.emoji || '❓'}</span>
+                              <SlotThumb slot={slot} />
                               <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{slot?.name || (rIdx === 0 ? 'Clica para definir' : 'Aguarda...')}</span>
                               {isW && <span>👑</span>}
                             </div>
@@ -589,7 +639,9 @@ function TournamentTab({ user }) {
                 const champ = w ? getP(rounds - 1, 0, w === 'p1' ? 0 : 1) : null
                 return (
                   <div className="champion-box">
-                    <div style={{ fontSize: 28, marginBottom: 6 }}>{champ?.emoji || '❓'}</div>
+                    {champ?.image
+                      ? <img src={champ.image} alt={champ.name} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }} />
+                      : <div style={{ fontSize: 28, marginBottom: 6 }}>❓</div>}
                     <div className="champion-label">CAMPEÃO</div>
                     <div className="champion-name">{champ?.name || 'Por decidir'}</div>
                   </div>
@@ -649,12 +701,15 @@ function TournamentTab({ user }) {
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setEditingPos(null)}>
           <div className="modal">
             <h3>Escolher Slot</h3>
+            <div className="form-group">
+              <input className="form-input" placeholder="Pesquisar slot..." value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, maxHeight: 360, overflowY: 'auto' }}>
-              {SLOTS_DATA.map((s, i) => (
+              {filteredSlots.slice(0, 60).map((s, i) => (
                 <div key={i} onClick={() => assignSlot(editingPos, s)} style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, transition: 'border-color 0.15s' }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(255,190,0,0.3)'}
                   onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'}>
-                  <span style={{ fontSize: 17 }}>{s.emoji}</span>
+                  {s.image ? <img src={s.image} alt={s.name} style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4 }} onError={ev => ev.target.style.display = 'none'} /> : <span style={{ fontSize: 17 }}>🎰</span>}
                   <div><div style={{ fontWeight: 500 }}>{s.name}</div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{s.provider}</div></div>
                 </div>
               ))}
@@ -671,6 +726,8 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [tab, setTab] = useState('randomizer')
   const [checkingAuth, setCheckingAuth] = useState(true)
+  const [slots, setSlots] = useState([])
+  const [slotsLoading, setSlotsLoading] = useState(true)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -680,6 +737,15 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user || null)
     })
+
+    // Carregar slots da API
+    import('./slots').then(({ fetchSlots }) => {
+      fetchSlots().then(data => {
+        setSlots(data)
+        setSlotsLoading(false)
+      }).catch(() => setSlotsLoading(false))
+    })
+
     return () => subscription.unsubscribe()
   }, [])
 
@@ -712,10 +778,10 @@ export default function App() {
           <span>{user.email.split('@')[0]}</span>
         </div>
       </div>
-      {tab === 'randomizer' && <RandomizerTab />}
-      {tab === 'hunt' && <BonusHuntTab user={user} />}
-      {tab === 'openings' && <OpeningsTab user={user} />}
-      {tab === 'tournament' && <TournamentTab user={user} />}
+      {tab === 'randomizer' && <RandomizerTab slots={slots} slotsLoading={slotsLoading} />}
+      {tab === 'hunt' && <BonusHuntTab user={user} slots={slots} />}
+      {tab === 'openings' && <OpeningsTab user={user} slots={slots} />}
+      {tab === 'tournament' && <TournamentTab user={user} slots={slots} />}
     </div>
   )
 }
