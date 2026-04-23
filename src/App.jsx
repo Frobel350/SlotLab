@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { fetchSlots } from './slots'
 
@@ -8,25 +8,6 @@ const fmtK = n => n >= 1000 ? `${(n / 1000).toFixed(0)}K` : n
 function VolBadge({ v }) {
   const cls = v === 'Very High' || v === 'Very high' ? 'badge-vhigh' : v === 'High' ? 'badge-high' : v === 'Medium' ? 'badge-medium' : 'badge-low'
   return <span className={`badge ${cls}`}>{v}</span>
-}
-
-function SlotImage({ slot, size = 40 }) {
-  const [src, setSrc] = useState(
-    `https://img.google.com/s2/favicons?domain=pragmaticplay.com&sz=${size}`
-  )
-  const googleImg = `https://www.google.com/search?q=${encodeURIComponent(slot.name + ' slot')}&tbm=isch`
-  
-  return (
-    <div style={{ 
-      width: size, height: size, borderRadius: 6, flexShrink: 0,
-      background: 'linear-gradient(135deg, rgba(255,190,0,0.2), rgba(255,149,0,0.1))',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.45, fontWeight: 700, color: '#ffbe00',
-      border: '1px solid rgba(255,190,0,0.2)', fontFamily: "'DM Sans', sans-serif"
-    }}>
-      {slot.name.charAt(0).toUpperCase()}
-    </div>
-  )
 }
 
 function AuthScreen({ onAuth }) {
@@ -47,7 +28,7 @@ function AuthScreen({ onAuth }) {
       } else {
         const { error } = await supabase.auth.signUp({ email, password })
         if (error) throw error
-        setSuccess('Conta criada! Já podes entrar.')
+        setSuccess('Account created! Check your email to confirm.')
       }
     } catch (e) { setError(e.message) }
     setLoading(false)
@@ -57,23 +38,23 @@ function AuthScreen({ onAuth }) {
     <div className="auth-wrap">
       <div className="auth-card">
         <div className="auth-logo">Slot<span>Lab</span></div>
-        <div className="auth-sub">A tua plataforma de bonus hunting</div>
+        <div className="auth-sub">Your bonus hunting platform</div>
         <div className="auth-tabs">
-          <button className={`auth-tab ${tab === 'login' ? 'active' : ''}`} onClick={() => setTab('login')}>Entrar</button>
-          <button className={`auth-tab ${tab === 'register' ? 'active' : ''}`} onClick={() => setTab('register')}>Criar Conta</button>
+          <button className={`auth-tab ${tab === 'login' ? 'active' : ''}`} onClick={() => setTab('login')}>Login</button>
+          <button className={`auth-tab ${tab === 'register' ? 'active' : ''}`} onClick={() => setTab('register')}>Sign Up</button>
         </div>
         {error && <div className="auth-error">⚠ {error}</div>}
         {success && <div className="auth-success">✓ {success}</div>}
         <div className="form-group">
           <label className="form-label">Email</label>
-          <input className="form-input" type="email" placeholder="teu@email.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && handle()} />
+          <input className="form-input" type="email" placeholder="your@email.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && handle()} />
         </div>
         <div className="form-group">
           <label className="form-label">Password</label>
           <input className="form-input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handle()} />
         </div>
         <button className="primary-btn" onClick={handle} disabled={loading || !email || !password}>
-          {loading ? '...' : tab === 'login' ? 'ENTRAR' : 'CRIAR CONTA'}
+          {loading ? '...' : tab === 'login' ? 'LOGIN' : 'SIGN UP'}
         </button>
       </div>
     </div>
@@ -81,104 +62,143 @@ function AuthScreen({ onAuth }) {
 }
 
 function RandomizerTab({ slots, slotsLoading }) {
-  const [filters, setFilters] = useState({ provider: '', volatility: '', theme: '', minMaxWin: '', maxMaxWin: '' })
+  const [selectedProviders, setSelectedProviders] = useState([])
+  const [volatility, setVolatility] = useState('')
+  const [theme, setTheme] = useState('')
+  const [minMaxWin, setMinMaxWin] = useState('')
+  const [maxMaxWin, setMaxMaxWin] = useState('')
   const [result, setResult] = useState(null)
   const [spinning, setSpinning] = useState(false)
+  const [spinPhase, setSpinPhase] = useState('idle')
+  const [providerOpen, setProviderOpen] = useState(false)
+  const [currentSlot, setCurrentSlot] = useState(null)
 
   const providers = [...new Set(slots.map(s => s.provider))].sort()
   const themes = [...new Set(slots.map(s => s.theme).filter(Boolean))].sort()
 
   const pool = slots.filter(s => {
-    if (filters.provider && s.provider !== filters.provider) return false
-    if (filters.volatility && s.volatility?.toLowerCase() !== filters.volatility.toLowerCase()) return false
-    if (filters.theme && s.theme !== filters.theme) return false
-    if (filters.minMaxWin && s.max_win < parseInt(filters.minMaxWin)) return false
-    if (filters.maxMaxWin && s.max_win > parseInt(filters.maxMaxWin)) return false
+    if (selectedProviders.length > 0 && !selectedProviders.includes(s.provider)) return false
+    if (volatility && s.volatility?.toLowerCase() !== volatility.toLowerCase()) return false
+    if (theme && s.theme !== theme) return false
+    if (minMaxWin && s.max_win < parseInt(minMaxWin)) return false
+    if (maxMaxWin && s.max_win > parseInt(maxMaxWin)) return false
     return true
   })
 
   const spin = () => {
     if (!pool.length) return
     setSpinning(true)
-    setTimeout(() => { setResult(pool[Math.floor(Math.random() * pool.length)]); setSpinning(false) }, 600)
+    setSpinPhase('spinning')
+    setResult(null)
+    let count = 0
+    const total = 20
+    const interval = setInterval(() => {
+      setCurrentSlot(pool[Math.floor(Math.random() * pool.length)])
+      count++
+      if (count >= total) {
+        clearInterval(interval)
+        const final = pool[Math.floor(Math.random() * pool.length)]
+        setCurrentSlot(final)
+        setResult(final)
+        setSpinPhase('result')
+        setSpinning(false)
+      }
+    }, 80)
   }
 
-  const setF = (k, v) => setFilters(f => ({ ...f, [k]: v }))
+  const toggleProvider = (p) => {
+    setSelectedProviders(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])
+  }
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <div className="section-title">🎰 Slot Randomizer</div>
-          <div className="section-sub">{slotsLoading ? 'A carregar slots...' : `${slots.length} slots disponíveis — filtra e sorteia`}</div>
+          <div className="section-sub">{slotsLoading ? 'Loading slots...' : `${slots.length} slots available — filter and spin`}</div>
         </div>
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="filters-row">
+          <div className="filter-group" style={{ position: 'relative' }}>
+            <label>Provider</label>
+            <button className="filter-select" style={{ textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setProviderOpen(o => !o)}>
+              <span>{selectedProviders.length === 0 ? `All (${providers.length})` : `${selectedProviders.length} selected`}</span>
+              <span>▾</span>
+            </button>
+            {providerOpen && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, background: '#0d1119', border: '1px solid rgba(255,190,0,0.2)', borderRadius: 8, minWidth: 240, maxHeight: 300, overflowY: 'auto', padding: 8 }}>
+                <div style={{ display: 'flex', gap: 8, padding: '4px 4px 8px', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: 6 }}>
+                  <button className="add-btn" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setSelectedProviders([...providers])}>Select All</button>
+                  <button className="ghost-btn" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setSelectedProviders([])}>Clear All</button>
+                </div>
+                {providers.map(p => (
+                  <div key={p} onClick={() => toggleProvider(p)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', cursor: 'pointer', borderRadius: 6, background: selectedProviders.includes(p) ? 'rgba(255,190,0,0.1)' : 'transparent' }}>
+                    <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${selectedProviders.includes(p) ? 'var(--gold)' : 'rgba(255,255,255,0.3)'}`, background: selectedProviders.includes(p) ? 'var(--gold)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      {selectedProviders.includes(p) && <span style={{ color: '#000', fontSize: 10, fontWeight: 700 }}>✓</span>}
+                    </div>
+                    <span style={{ fontSize: 13 }}>{p}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="filter-group">
-            <label>Provedor</label>
-            <select className="filter-select" value={filters.provider} onChange={e => setF('provider', e.target.value)}>
-              <option value="">Todos ({providers.length})</option>
-              {providers.map(p => <option key={p}>{p}</option>)}
+            <label>Volatility</label>
+            <select className="filter-select" value={volatility} onChange={e => setVolatility(e.target.value)}>
+              <option value="">All</option>
+              <option>Low</option><option>Medium</option><option>High</option><option>Very high</option>
             </select>
           </div>
           <div className="filter-group">
-            <label>Volatilidade</label>
-            <select className="filter-select" value={filters.volatility} onChange={e => setF('volatility', e.target.value)}>
-              <option value="">Todas</option>
-              <option>Low</option>
-              <option>Medium</option>
-              <option>High</option>
-              <option>Very high</option>
-            </select>
-          </div>
-          <div className="filter-group">
-            <label>Tema</label>
-            <select className="filter-select" value={filters.theme} onChange={e => setF('theme', e.target.value)}>
-              <option value="">Todos</option>
+            <label>Theme</label>
+            <select className="filter-select" value={theme} onChange={e => setTheme(e.target.value)}>
+              <option value="">All</option>
               {themes.map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
           <div className="filter-group">
-            <label>Max Win Mín.</label>
-            <input className="filter-input" type="number" placeholder="ex: 5000" style={{ minWidth: 120 }} value={filters.minMaxWin} onChange={e => setF('minMaxWin', e.target.value)} />
+            <label>Min Max Win</label>
+            <input className="filter-input" type="number" placeholder="e.g. 5000" style={{ minWidth: 120 }} value={minMaxWin} onChange={e => setMinMaxWin(e.target.value)} />
           </div>
           <div className="filter-group">
-            <label>Max Win Máx.</label>
-            <input className="filter-input" type="number" placeholder="ex: 100000" style={{ minWidth: 120 }} value={filters.maxMaxWin} onChange={e => setF('maxMaxWin', e.target.value)} />
+            <label>Max Max Win</label>
+            <input className="filter-input" type="number" placeholder="e.g. 100000" style={{ minWidth: 120 }} value={maxMaxWin} onChange={e => setMaxMaxWin(e.target.value)} />
           </div>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>{pool.length} slot{pool.length !== 1 ? 's' : ''} na pool</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>{pool.length} slot{pool.length !== 1 ? 's' : ''} in pool</div>
         <button className="spin-btn" onClick={spin} disabled={spinning || !pool.length || slotsLoading}>
-          {spinning ? 'A SORTEAR...' : '🎲 SORTEAR SLOT ALEATÓRIA'}
+          {spinning ? 'SPINNING...' : '🎲 SPIN RANDOM SLOT'}
         </button>
       </div>
 
-      {result && (
-        <div className="result-card">
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-            <SlotImage slot={result} size={80} />
+      {(spinPhase === 'spinning' || spinPhase === 'result') && currentSlot && (
+        <div className="result-card" style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+            {spinPhase === 'spinning' ? '🎰 Spinning...' : '🎯 Result'}
           </div>
-          <div className="result-name">{result.name}</div>
-          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>{result.provider}</div>
-          <div className="result-pills">
-            <VolBadge v={result.volatility} />
-            <span className="pill"><strong>Max Win</strong>{fmtK(result.max_win)}x</span>
-            <span className="pill"><strong>RTP</strong>{result.rtp}%</span>
-            <span className="pill"><strong>Tema</strong>{result.theme}</span>
-          </div>
+          <div className="result-name" style={{ fontSize: spinPhase === 'spinning' ? 22 : 30 }}>{currentSlot.name}</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>{currentSlot.provider}</div>
+          {spinPhase === 'result' && (
+            <div className="result-pills">
+              <VolBadge v={currentSlot.volatility} />
+              <span className="pill"><strong>Max Win</strong>{fmtK(currentSlot.max_win)}x</span>
+              <span className="pill"><strong>RTP</strong>{currentSlot.rtp}%</span>
+              <span className="pill"><strong>Theme</strong>{currentSlot.theme}</span>
+            </div>
+          )}
         </div>
       )}
 
       <div className="card">
         <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--muted)', marginBottom: 14 }}>Pool ({pool.length})</div>
         {slotsLoading ? (
-          <div className="empty-state"><span className="loading-pulse">A carregar slots da API...</span></div>
+          <div className="empty-state"><span className="loading-pulse">Loading slots...</span></div>
         ) : (
           <div className="slots-grid">
             {pool.slice(0, 200).map((s, i) => (
               <div key={i} className="slot-card">
-                <SlotImage slot={s} size={36} />
+                <span style={{ fontSize: 20 }}>🎰</span>
                 <div style={{ minWidth: 0 }}>
                   <div className="slot-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
                   <div className="slot-meta">{s.provider} · {fmtK(s.max_win)}x</div>
@@ -212,11 +232,21 @@ function BonusHuntTab({ user, slots }) {
     setLoading(false)
   }
 
+  const deleteHunt = async (huntId) => {
+    if (!confirm('Delete this hunt?')) return
+    await supabase.from('hunt_entries').delete().eq('hunt_id', huntId)
+    await supabase.from('bonus_hunts').delete().eq('id', huntId)
+    await loadHunts()
+    setActiveIdx(0)
+  }
+
   const createHunt = async () => {
     setSaving(true)
     await supabase.from('bonus_hunts').insert({ user_id: user.id, name: newHuntForm.name || `Hunt #${hunts.length + 1}`, start_balance: parseFloat(newHuntForm.startBalance) })
     await loadHunts(); setActiveIdx(0); setSaving(false); setShowNewHunt(false)
   }
+
+  const filteredSlots = slots.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.provider.toLowerCase().includes(search.toLowerCase()))
 
   const addEntry = async () => {
     const slot = filteredSlots[parseInt(newSlot.slotIdx)]
@@ -227,9 +257,10 @@ function BonusHuntTab({ user, slots }) {
     await loadHunts(); setSaving(false); setShowAdd(false); setSearch('')
   }
 
-  const updateMultiplier = async (entryId, val) => {
-    await supabase.from('hunt_entries').update({ multiplier: val ? parseFloat(val) : null }).eq('id', entryId)
-    setHunts(hs => hs.map(h => ({ ...h, hunt_entries: h.hunt_entries.map(e => e.id === entryId ? { ...e, multiplier: val } : e) })))
+  const updatePayout = async (entryId, payoutVal) => {
+    const payout = payoutVal ? parseFloat(payoutVal) : null
+    await supabase.from('hunt_entries').update({ payout, opened: payout != null }).eq('id', entryId)
+    setHunts(hs => hs.map(h => ({ ...h, hunt_entries: h.hunt_entries.map(e => e.id === entryId ? { ...e, payout: payoutVal, opened: payout != null } : e) })))
   }
 
   const toggleOpened = async (entryId, current) => {
@@ -242,84 +273,105 @@ function BonusHuntTab({ user, slots }) {
     setHunts(hs => hs.map(h => ({ ...h, hunt_entries: h.hunt_entries.filter(e => e.id !== entryId) })))
   }
 
-  const filteredSlots = slots.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.provider.toLowerCase().includes(search.toLowerCase()))
-
   const hunt = hunts[activeIdx]
   const entries = hunt?.hunt_entries || []
-  const totalCost = entries.reduce((s, e) => s + (parseFloat(e.bet_size) || 0) * 100, 0)
   const startBal = parseFloat(hunt?.start_balance) || 0
-  const beMul = totalCost > 0 ? ((startBal + totalCost) / totalCost).toFixed(2) : '—'
-  const opened = entries.filter(e => e.opened && e.multiplier)
-  const totalWon = opened.reduce((s, e) => s + (parseFloat(e.multiplier) || 0) * parseFloat(e.bet_size), 0)
-  const avgMul = opened.length ? (opened.reduce((s, e) => s + parseFloat(e.multiplier), 0) / opened.length).toFixed(1) : '—'
-  const profit = totalWon - startBal - totalCost
+  const opened = entries.filter(e => e.opened && e.payout != null)
+  const totalWon = opened.reduce((s, e) => s + (parseFloat(e.payout) || 0), 0)
+  const avgPayout = opened.length ? (totalWon / opened.length).toFixed(2) : '—'
+  const profit = totalWon - startBal
+  const remainingSlots = entries.filter(e => !e.opened).length
+  const beNeeded = remainingSlots > 0 ? ((startBal - totalWon) / remainingSlots).toFixed(2) : '—'
   const pending = entries.filter(e => !e.opened).length
 
-  if (loading) return <div className="page"><p className="loading-pulse">A carregar hunts...</p></div>
+  if (loading) return <div className="page"><p className="loading-pulse">Loading hunts...</p></div>
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <div className="section-title">🎯 Bonus Hunt</div>
-          <div className="section-sub">Regista e acompanha as tuas hunts em tempo real</div>
+          <div className="section-sub">Track your hunts in real time</div>
         </div>
-        <button className="add-btn" onClick={() => setShowNewHunt(true)}>+ Nova Hunt</button>
+        <button className="add-btn" onClick={() => setShowNewHunt(true)}>+ New Hunt</button>
       </div>
+
       {hunts.length === 0 ? (
-        <div className="empty-state card"><span className="empty-icon">🎯</span><p>Ainda não tens nenhuma hunt. Cria a primeira!</p></div>
+        <div className="empty-state card"><span className="empty-icon">🎯</span><p>No hunts yet. Create your first one!</p></div>
       ) : (
         <>
           <div className="tabs">
-            {hunts.map((h, i) => <button key={h.id} className={`tab-btn ${i === activeIdx ? 'active' : ''}`} onClick={() => setActiveIdx(i)}>{h.name}</button>)}
+            {hunts.map((h, i) => (
+              <div key={h.id} style={{ display: 'flex', alignItems: 'center' }}>
+                <button className={`tab-btn ${i === activeIdx ? 'active' : ''}`} onClick={() => setActiveIdx(i)}>{h.name}</button>
+                <button onClick={() => deleteHunt(h.id)} style={{ background: 'none', border: 'none', color: 'rgba(255,68,68,0.5)', cursor: 'pointer', fontSize: 12, padding: '0 4px', marginLeft: -4 }}>✕</button>
+              </div>
+            ))}
           </div>
+
           <div className="stats-grid">
-            {[['Saldo Inicial', `€${startBal}`, ''], ['Custo Total', `€${fmt(totalCost, 0)}`, ''], ['Break-Even', `${beMul}x`, ''], ['Média Atual', `${avgMul}x`, ''], ['Total Ganho', `€${fmt(totalWon, 0)}`, ''], ['Resultado', `${profit >= 0 ? '+' : ''}€${fmt(profit, 0)}`, profit >= 0 ? 'green' : 'red'], ['Por Abrir', `${pending}`, '']].map(([l, v, c]) => (
+            {[
+              ['Start Balance', `€${startBal}`, ''],
+              ['Break-Even/Slot', `€${beNeeded}`, ''],
+              ['Avg Payout', `€${avgPayout}`, ''],
+              ['Total Won', `€${fmt(totalWon, 0)}`, ''],
+              ['Result', `${profit >= 0 ? '+' : ''}€${fmt(profit, 0)}`, profit >= 0 ? 'green' : 'red'],
+              ['Pending', `${pending}`, ''],
+            ].map(([l, v, c]) => (
               <div key={l} className="stat-box"><div className="stat-label">{l}</div><div className={`stat-value ${c}`}>{v}</div></div>
             ))}
           </div>
+
           {entries.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginBottom: 5 }}>
-                <span>PROGRESSO ({opened.length}/{entries.length})</span>
+                <span>PROGRESS ({opened.length}/{entries.length})</span>
                 <span>{entries.length ? Math.round(opened.length / entries.length * 100) : 0}%</span>
               </div>
               <div className="progress-wrap"><div className="progress-bar" style={{ width: `${entries.length ? opened.length / entries.length * 100 : 0}%` }} /></div>
             </div>
           )}
+
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{entries.length} entradas</span>
-              <button className="add-btn" onClick={() => setShowAdd(true)}>+ Slot</button>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{entries.length} entries</span>
+              <button className="add-btn" onClick={() => setShowAdd(true)}>+ Add Slot</button>
             </div>
             {entries.length === 0 ? (
-              <div className="empty-state"><span className="empty-icon">🎰</span><p>Adiciona slots à hunt</p></div>
+              <div className="empty-state"><span className="empty-icon">🎰</span><p>Add slots to your hunt</p></div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table className="data-table">
-                  <thead><tr><th>Slot</th><th>Bet</th><th>Multiplier</th><th>Ganho</th><th>Status</th><th></th></tr></thead>
+                  <thead><tr><th>Slot</th><th>Bet</th><th>Payout (€)</th><th>Multiplier</th><th>Status</th><th></th></tr></thead>
                   <tbody>
-                    {entries.map(e => (
-                      <tr key={e.id} style={{ opacity: e.opened ? 0.65 : 1 }}>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {e.slot_image
-                              ? <img src={e.slot_image} alt={e.slot_name} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} onError={ev => ev.target.style.display = 'none'} />
-                              : <span style={{ fontSize: 22 }}>🎰</span>}
-                            <div><div style={{ fontWeight: 500 }}>{e.slot_name}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.slot_provider}</div></div>
-                          </div>
-                        </td>
-                        <td style={{ color: 'var(--gold)' }}>€{e.bet_size}</td>
-                        <td><input className="multi-input" type="number" placeholder="0" defaultValue={e.multiplier || ''} onBlur={ev => updateMultiplier(e.id, ev.target.value)} /></td>
-                        <td>{e.multiplier ? `€${(parseFloat(e.multiplier) * parseFloat(e.bet_size)).toFixed(2)}` : '—'}</td>
-                        <td>
-                          <button onClick={() => toggleOpened(e.id, e.opened)} style={{ background: e.opened ? 'rgba(0,230,122,0.08)' : 'rgba(255,255,255,0.04)', border: `1px solid ${e.opened ? 'rgba(0,230,122,0.25)' : 'var(--border)'}`, borderRadius: 6, color: e.opened ? 'var(--green)' : 'var(--muted)', fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}>
-                            {e.opened ? '✓ Aberto' : 'Pendente'}
-                          </button>
-                        </td>
-                        <td><button className="danger-btn" onClick={() => removeEntry(e.id)}>✕</button></td>
-                      </tr>
-                    ))}
+                    {entries.map(e => {
+                      const bet = parseFloat(e.bet_size) || 1
+                      const payout = e.payout ? parseFloat(e.payout) : null
+                      const multiplier = payout ? (payout / bet).toFixed(1) : null
+                      return (
+                        <tr key={e.id} style={{ opacity: e.opened ? 0.7 : 1 }}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 18 }}>🎰</span>
+                              <div><div style={{ fontWeight: 500 }}>{e.slot_name}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.slot_provider}</div></div>
+                            </div>
+                          </td>
+                          <td style={{ color: 'var(--gold)' }}>€{e.bet_size}</td>
+                          <td>
+                            <input className="multi-input" type="number" placeholder="0.00" defaultValue={e.payout || ''} onBlur={ev => updatePayout(e.id, ev.target.value)} style={{ width: 100 }} />
+                          </td>
+                          <td style={{ color: multiplier ? (parseFloat(multiplier) >= 100 ? 'var(--green)' : 'var(--gold)') : 'var(--muted)', fontFamily: "'Bebas Neue'", fontSize: 18 }}>
+                            {multiplier ? `${multiplier}x` : '—'}
+                          </td>
+                          <td>
+                            <button onClick={() => toggleOpened(e.id, e.opened)} style={{ background: e.opened ? 'rgba(0,230,122,0.08)' : 'rgba(255,255,255,0.04)', border: `1px solid ${e.opened ? 'rgba(0,230,122,0.25)' : 'var(--border)'}`, borderRadius: 6, color: e.opened ? 'var(--green)' : 'var(--muted)', fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}>
+                              {e.opened ? '✓ Done' : 'Pending'}
+                            </button>
+                          </td>
+                          <td><button className="danger-btn" onClick={() => removeEntry(e.id)}>✕</button></td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -327,26 +379,28 @@ function BonusHuntTab({ user, slots }) {
           </div>
         </>
       )}
+
       {showNewHunt && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowNewHunt(false)}>
           <div className="modal">
-            <h3>Nova Hunt</h3>
-            <div className="form-group"><label className="form-label">Nome</label><input className="form-input" placeholder="Hunt #1" value={newHuntForm.name} onChange={e => setNewHuntForm(f => ({ ...f, name: e.target.value }))} /></div>
-            <div className="form-group"><label className="form-label">Saldo Inicial (€)</label><input className="form-input" type="number" value={newHuntForm.startBalance} onChange={e => setNewHuntForm(f => ({ ...f, startBalance: e.target.value }))} /></div>
+            <h3>New Hunt</h3>
+            <div className="form-group"><label className="form-label">Name</label><input className="form-input" placeholder="Hunt #1" value={newHuntForm.name} onChange={e => setNewHuntForm(f => ({ ...f, name: e.target.value }))} /></div>
+            <div className="form-group"><label className="form-label">Starting Balance (€)</label><input className="form-input" type="number" value={newHuntForm.startBalance} onChange={e => setNewHuntForm(f => ({ ...f, startBalance: e.target.value }))} /></div>
             <div className="modal-actions">
-              <button className="ghost-btn" onClick={() => setShowNewHunt(false)}>Cancelar</button>
-              <button className="add-btn" onClick={createHunt} disabled={saving}>Criar</button>
+              <button className="ghost-btn" onClick={() => setShowNewHunt(false)}>Cancel</button>
+              <button className="add-btn" onClick={createHunt} disabled={saving}>Create</button>
             </div>
           </div>
         </div>
       )}
+
       {showAdd && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowAdd(false)}>
           <div className="modal">
-            <h3>Adicionar Slot</h3>
+            <h3>Add Slot</h3>
             <div className="form-group">
-              <label className="form-label">Pesquisar</label>
-              <input className="form-input" placeholder="Nome da slot ou provedor..." value={search} onChange={e => { setSearch(e.target.value); setNewSlot(s => ({ ...s, slotIdx: 0 })) }} />
+              <label className="form-label">Search</label>
+              <input className="form-input" placeholder="Slot name or provider..." value={search} onChange={e => { setSearch(e.target.value); setNewSlot(s => ({ ...s, slotIdx: 0 })) }} />
             </div>
             <div className="form-group">
               <label className="form-label">Slot ({filteredSlots.length})</label>
@@ -356,8 +410,8 @@ function BonusHuntTab({ user, slots }) {
             </div>
             <div className="form-group"><label className="form-label">Bet Size (€)</label><input className="form-input" type="number" step="0.1" value={newSlot.betSize} onChange={e => setNewSlot(s => ({ ...s, betSize: e.target.value }))} /></div>
             <div className="modal-actions">
-              <button className="ghost-btn" onClick={() => setShowAdd(false)}>Cancelar</button>
-              <button className="add-btn" onClick={addEntry} disabled={saving}>Adicionar</button>
+              <button className="ghost-btn" onClick={() => setShowAdd(false)}>Cancel</button>
+              <button className="add-btn" onClick={addEntry} disabled={saving}>Add</button>
             </div>
           </div>
         </div>
@@ -372,7 +426,7 @@ function OpeningsTab({ user, slots }) {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [showNewSession, setShowNewSession] = useState(false)
-  const [newOpening, setNewOpening] = useState({ slotIdx: 0, multiplier: '' })
+  const [newOpening, setNewOpening] = useState({ slotIdx: 0, payout: '' })
   const [newSession, setNewSession] = useState({ startBalance: '300', betSize: '1' })
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
@@ -386,6 +440,14 @@ function OpeningsTab({ user, slots }) {
     setLoading(false)
   }
 
+  const deleteSession = async (sessionId) => {
+    if (!confirm('Delete this session?')) return
+    await supabase.from('openings').delete().eq('session_id', sessionId)
+    await supabase.from('opening_sessions').delete().eq('id', sessionId)
+    await loadSessions()
+    setActiveIdx(0)
+  }
+
   const createSession = async () => {
     setSaving(true)
     await supabase.from('opening_sessions').insert({ user_id: user.id, date: new Date().toISOString().split('T')[0], start_balance: parseFloat(newSession.startBalance), bet_size: parseFloat(newSession.betSize) })
@@ -395,13 +457,16 @@ function OpeningsTab({ user, slots }) {
   const filteredSlots = slots.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.provider.toLowerCase().includes(search.toLowerCase()))
 
   const addOpening = async () => {
-    if (!newOpening.multiplier) return
+    if (!newOpening.payout) return
     const slot = filteredSlots[parseInt(newOpening.slotIdx)]
     if (!slot) return
     const session = sessions[activeIdx]
+    const bet = parseFloat(session.bet_size) || 1
+    const payout = parseFloat(newOpening.payout)
+    const multiplier = (payout / bet).toFixed(2)
     setSaving(true)
-    await supabase.from('openings').insert({ session_id: session.id, slot_name: slot.name, slot_emoji: slot.emoji, slot_provider: slot.provider, slot_volatility: slot.volatility, slot_image: slot.image || null, multiplier: parseFloat(newOpening.multiplier) })
-    await loadSessions(); setSaving(false); setShowAdd(false); setNewOpening({ slotIdx: 0, multiplier: '' }); setSearch('')
+    await supabase.from('openings').insert({ session_id: session.id, slot_name: slot.name, slot_emoji: slot.emoji, slot_provider: slot.provider, slot_volatility: slot.volatility, slot_image: slot.image || null, multiplier, payout })
+    await loadSessions(); setSaving(false); setShowAdd(false); setNewOpening({ slotIdx: 0, payout: '' }); setSearch('')
   }
 
   const removeOpening = async (id) => {
@@ -411,69 +476,83 @@ function OpeningsTab({ user, slots }) {
 
   const session = sessions[activeIdx]
   const ops = session?.openings || []
-  const bet = parseFloat(session?.bet_size) || 1
-  const totalWon = ops.reduce((s, o) => s + parseFloat(o.multiplier) * bet, 0)
-  const avgMul = ops.length ? (ops.reduce((s, o) => s + parseFloat(o.multiplier), 0) / ops.length).toFixed(1) : '—'
-  const best = ops.length ? ops.reduce((a, b) => parseFloat(b.multiplier) > parseFloat(a.multiplier) ? b : a) : null
-  const profit = totalWon - parseFloat(session?.start_balance || 0)
+  const startBal = parseFloat(session?.start_balance) || 0
+  const totalWon = ops.reduce((s, o) => s + (parseFloat(o.payout) || 0), 0)
+  const avgPayout = ops.length ? (totalWon / ops.length).toFixed(2) : '—'
+  const best = ops.length ? ops.reduce((a, b) => parseFloat(b.payout) > parseFloat(a.payout) ? b : a) : null
+  const profit = totalWon - startBal
 
-  if (loading) return <div className="page"><p className="loading-pulse">A carregar sessões...</p></div>
+  if (loading) return <div className="page"><p className="loading-pulse">Loading sessions...</p></div>
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <div className="section-title">📊 Bonus Openings</div>
-          <div className="section-sub">Regista multiplicadores e acompanha a tua sessão</div>
+          <div className="section-sub">Track your bonus openings and payouts</div>
         </div>
-        <button className="add-btn" onClick={() => setShowNewSession(true)}>+ Nova Sessão</button>
+        <button className="add-btn" onClick={() => setShowNewSession(true)}>+ New Session</button>
       </div>
+
       {sessions.length === 0 ? (
-        <div className="empty-state card"><span className="empty-icon">📊</span><p>Cria a tua primeira sessão de openings</p></div>
+        <div className="empty-state card"><span className="empty-icon">📊</span><p>Create your first opening session</p></div>
       ) : (
         <>
           <div className="tabs">
-            {sessions.map((s, i) => <button key={s.id} className={`tab-btn ${i === activeIdx ? 'active' : ''}`} onClick={() => setActiveIdx(i)}>{s.date}</button>)}
+            {sessions.map((s, i) => (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
+                <button className={`tab-btn ${i === activeIdx ? 'active' : ''}`} onClick={() => setActiveIdx(i)}>{s.date}</button>
+                <button onClick={() => deleteSession(s.id)} style={{ background: 'none', border: 'none', color: 'rgba(255,68,68,0.5)', cursor: 'pointer', fontSize: 12, padding: '0 4px', marginLeft: -4 }}>✕</button>
+              </div>
+            ))}
           </div>
+
           <div className="stats-grid">
-            {[['Saldo Inicial', `€${session?.start_balance}`, ''], ['Bet', `€${session?.bet_size}`, ''], ['Openings', `${ops.length}`, ''], ['Média Multi', `${avgMul}x`, ''], ['Total Ganho', `€${fmt(totalWon, 0)}`, ''], ['Resultado', `${profit >= 0 ? '+' : ''}€${fmt(profit, 0)}`, profit >= 0 ? 'green' : 'red']].map(([l, v, c]) => (
+            {[
+              ['Start Balance', `€${startBal}`, ''],
+              ['Bet Size', `€${session?.bet_size}`, ''],
+              ['Openings', `${ops.length}`, ''],
+              ['Avg Payout', `€${avgPayout}`, ''],
+              ['Total Won', `€${fmt(totalWon, 0)}`, ''],
+              ['Result', `${profit >= 0 ? '+' : ''}€${fmt(profit, 0)}`, profit >= 0 ? 'green' : 'red'],
+            ].map(([l, v, c]) => (
               <div key={l} className="stat-box"><div className="stat-label">{l}</div><div className={`stat-value ${c}`}>{v}</div></div>
             ))}
           </div>
+
           {best && (
             <div style={{ background: 'rgba(255,190,0,0.05)', border: '1px solid rgba(255,190,0,0.13)', borderRadius: 10, padding: '10px 14px', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
               <span style={{ fontSize: 20 }}>⭐</span>
-              <span><strong style={{ color: 'var(--gold)' }}>Best:</strong> {best.slot_name} — <strong style={{ color: 'var(--gold)' }}>{best.multiplier}x</strong> (€{fmt(parseFloat(best.multiplier) * bet)})</span>
+              <span><strong style={{ color: 'var(--gold)' }}>Best:</strong> {best.slot_name} — <strong style={{ color: 'var(--gold)' }}>€{fmt(parseFloat(best.payout))}</strong> ({best.multiplier}x)</span>
             </div>
           )}
+
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>{ops.length} opening{ops.length !== 1 ? 's' : ''}</span>
-              <button className="add-btn" onClick={() => setShowAdd(true)}>+ Registar</button>
+              <button className="add-btn" onClick={() => setShowAdd(true)}>+ Add Opening</button>
             </div>
             {ops.length === 0 ? (
-              <div className="empty-state"><span className="empty-icon">🎰</span><p>Regista os teus bonuses aqui</p></div>
+              <div className="empty-state"><span className="empty-icon">🎰</span><p>Record your bonuses here</p></div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table className="data-table">
-                  <thead><tr><th>#</th><th>Slot</th><th>Multiplier</th><th>Payout</th><th></th></tr></thead>
+                  <thead><tr><th>#</th><th>Slot</th><th>Payout (€)</th><th>Multiplier</th><th></th></tr></thead>
                   <tbody>
                     {ops.map((o, idx) => (
                       <tr key={o.id}>
                         <td style={{ color: 'var(--muted)', fontSize: 12 }}>{idx + 1}</td>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {o.slot_image
-                              ? <img src={o.slot_image} alt={o.slot_name} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} onError={ev => ev.target.style.display = 'none'} />
-                              : <span style={{ fontSize: 22 }}>🎰</span>}
+                            <span style={{ fontSize: 18 }}>🎰</span>
                             <div>
                               <div style={{ fontWeight: 500 }}>{o.slot_name}</div>
                               {best?.id === o.id && <span style={{ fontSize: 10, color: 'var(--gold)' }}>⭐ BEST</span>}
                             </div>
                           </div>
                         </td>
-                        <td><span style={{ fontFamily: "'Bebas Neue'", fontSize: 20, color: parseFloat(o.multiplier) >= 100 ? 'var(--green)' : parseFloat(o.multiplier) >= 50 ? 'var(--gold)' : 'var(--text)' }}>{o.multiplier}x</span></td>
-                        <td style={{ color: 'var(--green)' }}>€{fmt(parseFloat(o.multiplier) * bet)}</td>
+                        <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue'", fontSize: 20 }}>€{fmt(parseFloat(o.payout))}</td>
+                        <td style={{ color: parseFloat(o.multiplier) >= 100 ? 'var(--green)' : parseFloat(o.multiplier) >= 50 ? 'var(--gold)' : 'var(--text)' }}>{o.multiplier}x</td>
                         <td><button className="danger-btn" onClick={() => removeOpening(o.id)}>✕</button></td>
                       </tr>
                     ))}
@@ -484,28 +563,30 @@ function OpeningsTab({ user, slots }) {
           </div>
         </>
       )}
+
       {showNewSession && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowNewSession(false)}>
           <div className="modal">
-            <h3>Nova Sessão</h3>
+            <h3>New Session</h3>
             <div className="form-row">
-              <div className="form-group"><label className="form-label">Saldo Inicial (€)</label><input className="form-input" type="number" value={newSession.startBalance} onChange={e => setNewSession(s => ({ ...s, startBalance: e.target.value }))} /></div>
+              <div className="form-group"><label className="form-label">Start Balance (€)</label><input className="form-input" type="number" value={newSession.startBalance} onChange={e => setNewSession(s => ({ ...s, startBalance: e.target.value }))} /></div>
               <div className="form-group"><label className="form-label">Bet Size (€)</label><input className="form-input" type="number" step="0.1" value={newSession.betSize} onChange={e => setNewSession(s => ({ ...s, betSize: e.target.value }))} /></div>
             </div>
             <div className="modal-actions">
-              <button className="ghost-btn" onClick={() => setShowNewSession(false)}>Cancelar</button>
-              <button className="add-btn" onClick={createSession} disabled={saving}>Criar</button>
+              <button className="ghost-btn" onClick={() => setShowNewSession(false)}>Cancel</button>
+              <button className="add-btn" onClick={createSession} disabled={saving}>Create</button>
             </div>
           </div>
         </div>
       )}
+
       {showAdd && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowAdd(false)}>
           <div className="modal">
-            <h3>Registar Opening</h3>
+            <h3>Record Opening</h3>
             <div className="form-group">
-              <label className="form-label">Pesquisar</label>
-              <input className="form-input" placeholder="Nome da slot ou provedor..." value={search} onChange={e => { setSearch(e.target.value); setNewOpening(s => ({ ...s, slotIdx: 0 })) }} />
+              <label className="form-label">Search</label>
+              <input className="form-input" placeholder="Slot name or provider..." value={search} onChange={e => { setSearch(e.target.value); setNewOpening(s => ({ ...s, slotIdx: 0 })) }} />
             </div>
             <div className="form-group">
               <label className="form-label">Slot</label>
@@ -513,10 +594,18 @@ function OpeningsTab({ user, slots }) {
                 {filteredSlots.slice(0, 100).map((s, i) => <option key={i} value={i}>{s.name} — {s.provider}</option>)}
               </select>
             </div>
-            <div className="form-group"><label className="form-label">Multiplicador (x)</label><input className="form-input" type="number" step="0.1" placeholder="ex: 45.5" value={newOpening.multiplier} onChange={e => setNewOpening(s => ({ ...s, multiplier: e.target.value }))} /></div>
+            <div className="form-group">
+              <label className="form-label">Payout (€)</label>
+              <input className="form-input" type="number" step="0.01" placeholder="e.g. 45.50" value={newOpening.payout} onChange={e => setNewOpening(s => ({ ...s, payout: e.target.value }))} />
+              {newOpening.payout && session && (
+                <div style={{ fontSize: 12, color: 'var(--gold)', marginTop: 4 }}>
+                  = {(parseFloat(newOpening.payout) / (parseFloat(session.bet_size) || 1)).toFixed(1)}x multiplier
+                </div>
+              )}
+            </div>
             <div className="modal-actions">
-              <button className="ghost-btn" onClick={() => setShowAdd(false)}>Cancelar</button>
-              <button className="add-btn" onClick={addOpening} disabled={saving || !newOpening.multiplier}>Registar</button>
+              <button className="ghost-btn" onClick={() => setShowAdd(false)}>Cancel</button>
+              <button className="add-btn" onClick={addOpening} disabled={saving || !newOpening.payout}>Record</button>
             </div>
           </div>
         </div>
@@ -534,6 +623,8 @@ function TournamentTab({ user, slots }) {
   const [tournamentName, setTournamentName] = useState('')
   const [editingPos, setEditingPos] = useState(null)
   const [search, setSearch] = useState('')
+  const [editingMultiplier, setEditingMultiplier] = useState(null)
+  const [multValue, setMultValue] = useState('')
 
   useEffect(() => { loadTournaments() }, [user])
 
@@ -544,8 +635,15 @@ function TournamentTab({ user, slots }) {
     setLoading(false)
   }
 
+  const deleteTournament = async (id) => {
+    if (!confirm('Delete this tournament?')) return
+    await supabase.from('tournaments').delete().eq('id', id)
+    await loadTournaments()
+    setActiveIdx(0)
+  }
+
   const createTournament = async () => {
-    await supabase.from('tournaments').insert({ user_id: user.id, name: tournamentName || `Torneio #${tournaments.length + 1}`, size, bracket: { assignments: {}, scores: {} } })
+    await supabase.from('tournaments').insert({ user_id: user.id, name: tournamentName || `Tournament #${tournaments.length + 1}`, size, bracket: { assignments: {}, scores: {}, multipliers: {} } })
     await loadTournaments(); setActiveIdx(0); setCreating(false); setTournamentName('')
   }
 
@@ -560,13 +658,13 @@ function TournamentTab({ user, slots }) {
     const t = tournaments[activeIdx]
     const shuffled = [...slots].sort(() => Math.random() - 0.5).slice(0, t.size)
     const assignments = {}
-    shuffled.forEach((s, i) => { assignments[i] = { name: s.name, emoji: s.emoji, image: s.image } })
-    updateBracket({ assignments, scores: {} })
+    shuffled.forEach((s, i) => { assignments[i] = { name: s.name, emoji: s.emoji } })
+    updateBracket({ assignments, scores: {}, multipliers: {} })
   }
 
   const assignSlot = (pos, slot) => {
     const t = tournaments[activeIdx]
-    const assignments = { ...(t.bracket?.assignments || {}), [pos]: { name: slot.name, emoji: slot.emoji, image: slot.image } }
+    const assignments = { ...(t.bracket?.assignments || {}), [pos]: { name: slot.name, emoji: slot.emoji } }
     updateBracket({ assignments })
     setEditingPos(null); setSearch('')
   }
@@ -577,17 +675,34 @@ function TournamentTab({ user, slots }) {
     updateBracket({ scores })
   }
 
+  const undoWinner = (key) => {
+    const t = tournaments[activeIdx]
+    const scores = { ...(t.bracket?.scores || {}) }
+    delete scores[key]
+    updateBracket({ scores })
+  }
+
+  const saveMultiplier = () => {
+    if (!multValue || !editingMultiplier) return
+    const t = tournaments[activeIdx]
+    const multipliers = { ...(t.bracket?.multipliers || {}), [`${editingMultiplier.key}_${editingMultiplier.player}`]: parseFloat(multValue) }
+    updateBracket({ multipliers })
+    setEditingMultiplier(null)
+    setMultValue('')
+  }
+
   const filteredSlots = slots.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.provider.toLowerCase().includes(search.toLowerCase()))
 
-  if (loading) return <div className="page"><p className="loading-pulse">A carregar torneios...</p></div>
+  if (loading) return <div className="page"><p className="loading-pulse">Loading tournaments...</p></div>
 
   const tournament = tournaments[activeIdx]
 
   const renderBracket = (t) => {
     const assignments = t.bracket?.assignments || {}
     const scores = t.bracket?.scores || {}
+    const multipliers = t.bracket?.multipliers || {}
     const rounds = Math.log2(t.size)
-    const roundNames = ['Eliminatórias', 'Oitavos', 'Quartos', 'Meias-Final', 'Final']
+    const roundNames = ['Round of ' + t.size, 'Quarter Finals', 'Semi Finals', 'Final']
 
     const getP = (rIdx, mIdx, pIdx) => {
       if (rIdx === 0) return assignments[mIdx * 2 + pIdx] || null
@@ -597,10 +712,6 @@ function TournamentTab({ user, slots }) {
       return getP(rIdx - 1, mIdx * 2 + pIdx, w === 'p1' ? 0 : 1)
     }
 
-    const SlotThumb = ({ slot }) => slot?.image
-      ? <img src={slot.image} alt={slot.name} style={{ width: 24, height: 24, objectFit: 'cover', borderRadius: 4 }} onError={ev => ev.target.replaceWith(Object.assign(document.createElement('span'), { textContent: '🎰' }))} />
-      : <span style={{ fontSize: 16 }}>🎰</span>
-
     return (
       <div className="bracket-wrap">
         <div className="bracket">
@@ -609,7 +720,7 @@ function TournamentTab({ user, slots }) {
             const spacing = Math.pow(2, rIdx) * 90 - 90
             return (
               <div key={rIdx} className="bracket-round">
-                <div className="round-label">{roundNames[rIdx] || `Ronda ${rIdx + 1}`}</div>
+                <div className="round-label">{roundNames[rIdx] || `Round ${rIdx + 1}`}</div>
                 {Array.from({ length: matchCount }, (_, mIdx) => {
                   const p1 = getP(rIdx, mIdx, 0)
                   const p2 = getP(rIdx, mIdx, 1)
@@ -622,15 +733,32 @@ function TournamentTab({ user, slots }) {
                           const player = pi === 0 ? 'p1' : 'p2'
                           const isW = winner === player
                           const isL = winner && winner !== player
+                          const mult = multipliers[`${key}_${player}`]
                           return (
-                            <div key={pi} className={`matchup-slot ${isW ? 'winner' : ''} ${isL ? 'loser' : ''}`}
-                              onClick={() => {
+                            <div key={pi} className={`matchup-slot ${isW ? 'winner' : ''} ${isL ? 'loser' : ''}`}>
+                              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => {
                                 if (!slot && rIdx === 0) setEditingPos(mIdx * 2 + pi)
                                 else if (!winner && slot) setWinner(key, player)
                               }}>
-                              <SlotThumb slot={slot} />
-                              <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{slot?.name || (rIdx === 0 ? 'Clica para definir' : 'Aguarda...')}</span>
-                              {isW && <span>👑</span>}
+                                <span style={{ fontSize: 14 }}>{slot?.emoji || '❓'}</span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {slot?.name || (rIdx === 0 ? 'Click to set' : 'TBD')}
+                                  </div>
+                                  {mult && <div style={{ fontSize: 10, color: isW ? 'var(--gold)' : 'var(--muted)' }}>{mult}x</div>}
+                                </div>
+                                {isW && <span style={{ fontSize: 12 }}>👑</span>}
+                              </div>
+                              <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                                {slot && (
+                                  <button onClick={() => { setEditingMultiplier({ key, player }); setMultValue(mult || '') }}
+                                    style={{ background: 'rgba(255,190,0,0.1)', border: '1px solid rgba(255,190,0,0.2)', borderRadius: 4, color: 'var(--gold)', fontSize: 9, padding: '2px 5px', cursor: 'pointer' }}>×</button>
+                                )}
+                                {isW && (
+                                  <button onClick={() => undoWinner(key)}
+                                    style={{ background: 'rgba(255,68,68,0.1)', border: '1px solid rgba(255,68,68,0.2)', borderRadius: 4, color: 'var(--red)', fontSize: 9, padding: '2px 5px', cursor: 'pointer' }}>↩</button>
+                                )}
+                              </div>
                             </div>
                           )
                         })}
@@ -642,18 +770,16 @@ function TournamentTab({ user, slots }) {
             )
           })}
           <div className="bracket-round">
-            <div className="round-label">🏆 Campeão</div>
+            <div className="round-label">🏆 Champion</div>
             <div style={{ paddingTop: Math.pow(2, rounds - 1) * 90 / 2 - 44 }}>
               {(() => {
                 const w = scores[`${rounds - 1}-0`]
                 const champ = w ? getP(rounds - 1, 0, w === 'p1' ? 0 : 1) : null
                 return (
                   <div className="champion-box">
-                    {champ?.image
-                      ? <img src={champ.image} alt={champ.name} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }} />
-                      : <div style={{ fontSize: 28, marginBottom: 6 }}>❓</div>}
-                    <div className="champion-label">CAMPEÃO</div>
-                    <div className="champion-name">{champ?.name || 'Por decidir'}</div>
+                    <div style={{ fontSize: 28, marginBottom: 6 }}>{champ?.emoji || '❓'}</div>
+                    <div className="champion-label">CHAMPION</div>
+                    <div className="champion-name">{champ?.name || 'TBD'}</div>
                   </div>
                 )
               })()}
@@ -669,31 +795,38 @@ function TournamentTab({ user, slots }) {
       <div className="page-header">
         <div>
           <div className="section-title">🏆 Tournament</div>
-          <div className="section-sub">Brackets de eliminação entre slots</div>
+          <div className="section-sub">Elimination brackets between slots</div>
         </div>
-        <button className="add-btn" onClick={() => setCreating(true)}>+ Novo Torneio</button>
+        <button className="add-btn" onClick={() => setCreating(true)}>+ New Tournament</button>
       </div>
+
       {tournaments.length === 0 ? (
-        <div className="empty-state card"><span className="empty-icon">🏆</span><p>Cria o teu primeiro torneio!</p></div>
+        <div className="empty-state card"><span className="empty-icon">🏆</span><p>Create your first tournament!</p></div>
       ) : (
         <>
           <div className="tabs">
-            {tournaments.map((t, i) => <button key={t.id} className={`tab-btn ${i === activeIdx ? 'active' : ''}`} onClick={() => setActiveIdx(i)}>{t.name}</button>)}
+            {tournaments.map((t, i) => (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center' }}>
+                <button className={`tab-btn ${i === activeIdx ? 'active' : ''}`} onClick={() => setActiveIdx(i)}>{t.name}</button>
+                <button onClick={() => deleteTournament(t.id)} style={{ background: 'none', border: 'none', color: 'rgba(255,68,68,0.5)', cursor: 'pointer', fontSize: 12, padding: '0 4px', marginLeft: -4 }}>✕</button>
+              </div>
+            ))}
           </div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button className="add-btn" onClick={randomize}>🎲 Sortear Slots</button>
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Clica nas slots para votar o vencedor</span>
+            <button className="add-btn" onClick={randomize}>🎲 Randomize Slots</button>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Click slot to set winner · ↩ undo · × set multiplier</span>
           </div>
           <div className="card">{tournament && renderBracket(tournament)}</div>
         </>
       )}
+
       {creating && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setCreating(false)}>
           <div className="modal">
-            <h3>Novo Torneio</h3>
-            <div className="form-group"><label className="form-label">Nome</label><input className="form-input" placeholder="Torneio de Abril" value={tournamentName} onChange={e => setTournamentName(e.target.value)} /></div>
+            <h3>New Tournament</h3>
+            <div className="form-group"><label className="form-label">Name</label><input className="form-input" placeholder="April Tournament" value={tournamentName} onChange={e => setTournamentName(e.target.value)} /></div>
             <div className="form-group">
-              <label className="form-label">Nº de Slots</label>
+              <label className="form-label">Number of Slots</label>
               <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                 {[4, 8, 16].map(n => (
                   <button key={n} onClick={() => setSize(n)} style={{ flex: 1, background: size === n ? 'rgba(255,190,0,0.15)' : 'rgba(255,255,255,0.04)', border: `1px solid ${size === n ? 'rgba(255,190,0,0.4)' : 'var(--border)'}`, borderRadius: 8, color: size === n ? 'var(--gold)' : 'var(--muted)', fontFamily: "'Bebas Neue'", fontSize: 24, padding: '12px', cursor: 'pointer' }}>{n}</button>
@@ -701,30 +834,48 @@ function TournamentTab({ user, slots }) {
               </div>
             </div>
             <div className="modal-actions">
-              <button className="ghost-btn" onClick={() => setCreating(false)}>Cancelar</button>
-              <button className="add-btn" onClick={createTournament}>Criar</button>
+              <button className="ghost-btn" onClick={() => setCreating(false)}>Cancel</button>
+              <button className="add-btn" onClick={createTournament}>Create</button>
             </div>
           </div>
         </div>
       )}
+
       {editingPos !== null && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setEditingPos(null)}>
           <div className="modal">
-            <h3>Escolher Slot</h3>
+            <h3>Choose Slot</h3>
             <div className="form-group">
-              <input className="form-input" placeholder="Pesquisar slot..." value={search} onChange={e => setSearch(e.target.value)} />
+              <input className="form-input" placeholder="Search slot..." value={search} onChange={e => setSearch(e.target.value)} autoFocus />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, maxHeight: 360, overflowY: 'auto' }}>
               {filteredSlots.slice(0, 60).map((s, i) => (
-                <div key={i} onClick={() => assignSlot(editingPos, s)} style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, transition: 'border-color 0.15s' }}
+                <div key={i} onClick={() => assignSlot(editingPos, s)}
+                  style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(255,190,0,0.3)'}
                   onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'}>
-                  {s.image ? <img src={s.image} alt={s.name} style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4 }} onError={ev => ev.target.style.display = 'none'} /> : <span style={{ fontSize: 17 }}>🎰</span>}
+                  <span style={{ fontSize: 17 }}>🎰</span>
                   <div><div style={{ fontWeight: 500 }}>{s.name}</div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{s.provider}</div></div>
                 </div>
               ))}
             </div>
-            <div className="modal-actions"><button className="ghost-btn" onClick={() => setEditingPos(null)}>Fechar</button></div>
+            <div className="modal-actions"><button className="ghost-btn" onClick={() => setEditingPos(null)}>Close</button></div>
+          </div>
+        </div>
+      )}
+
+      {editingMultiplier && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setEditingMultiplier(null)}>
+          <div className="modal">
+            <h3>Set Multiplier</h3>
+            <div className="form-group">
+              <label className="form-label">Multiplier (x)</label>
+              <input className="form-input" type="number" step="0.1" placeholder="e.g. 45.5" value={multValue} onChange={e => setMultValue(e.target.value)} autoFocus onKeyDown={e => e.key === 'Enter' && saveMultiplier()} />
+            </div>
+            <div className="modal-actions">
+              <button className="ghost-btn" onClick={() => setEditingMultiplier(null)}>Cancel</button>
+              <button className="add-btn" onClick={saveMultiplier} disabled={!multValue}>Save</button>
+            </div>
           </div>
         </div>
       )}
@@ -738,6 +889,7 @@ export default function App() {
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [slots, setSlots] = useState([])
   const [slotsLoading, setSlotsLoading] = useState(true)
+  const [showUserMenu, setShowUserMenu] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -747,19 +899,14 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user || null)
     })
-
-    // Carregar slots da API
-    import('./slots').then(({ fetchSlots }) => {
-      fetchSlots().then(data => {
-        setSlots(data)
-        setSlotsLoading(false)
-      }).catch(() => setSlotsLoading(false))
-    })
-
+    fetchSlots().then(data => {
+      setSlots(data)
+      setSlotsLoading(false)
+    }).catch(() => setSlotsLoading(false))
     return () => subscription.unsubscribe()
   }, [])
 
-  const logout = async () => { await supabase.auth.signOut(); setUser(null) }
+  const logout = async () => { await supabase.auth.signOut(); setUser(null); setShowUserMenu(false) }
 
   if (checkingAuth) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -783,9 +930,23 @@ export default function App() {
         <nav className="nav">
           {TABS.map(t => <button key={t.id} className={`nav-btn ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>)}
         </nav>
-        <div className="user-pill" onClick={logout} title="Clica para sair">
-          <div className="avatar">{user.email[0].toUpperCase()}</div>
-          <span>{user.email.split('@')[0]}</span>
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div className="user-pill" onClick={() => setShowUserMenu(o => !o)}>
+            <div className="avatar">{user.email[0].toUpperCase()}</div>
+            <span>{user.email.split('@')[0]}</span>
+            <span style={{ fontSize: 10, marginLeft: 2 }}>▾</span>
+          </div>
+          {showUserMenu && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShowUserMenu(false)} />
+              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 8, background: '#0d1119', border: '1px solid rgba(255,190,0,0.2)', borderRadius: 10, padding: 8, minWidth: 180, zIndex: 200 }}>
+                <div style={{ padding: '6px 12px', fontSize: 12, color: 'var(--muted)', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>{user.email}</div>
+                <button onClick={logout} style={{ width: '100%', background: 'none', border: 'none', color: 'var(--red)', fontSize: 13, padding: '8px 12px', cursor: 'pointer', textAlign: 'left', borderRadius: 6 }}>
+                  🚪 Log Out
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
       {tab === 'randomizer' && <RandomizerTab slots={slots} slotsLoading={slotsLoading} />}
