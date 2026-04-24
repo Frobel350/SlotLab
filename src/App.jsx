@@ -72,6 +72,19 @@ function RandomizerTab({ slots, slotsLoading }) {
   const [spinPhase, setSpinPhase] = useState('idle')
   const [providerOpen, setProviderOpen] = useState(false)
   const [currentSlot, setCurrentSlot] = useState(null)
+  const [flipKey, setFlipKey] = useState(0)
+  const providerRef = useRef(null)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (providerRef.current && !providerRef.current.contains(e.target)) {
+        setProviderOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   const providers = [...new Set(slots.map(s => s.provider))].sort()
   const themes = [...new Set(slots.map(s => s.theme).filter(Boolean))].sort()
@@ -91,19 +104,23 @@ function RandomizerTab({ slots, slotsLoading }) {
     setSpinPhase('spinning')
     setResult(null)
     let count = 0
-    const total = 20
-    const interval = setInterval(() => {
+    const total = 25
+    // Speed: fast at start, slow at end
+    const getDelay = (i) => i < 10 ? 60 : i < 18 ? 100 : i < 22 ? 160 : 240
+    const tick = (i) => {
       setCurrentSlot(pool[Math.floor(Math.random() * pool.length)])
-      count++
-      if (count >= total) {
-        clearInterval(interval)
+      setFlipKey(k => k + 1)
+      if (i >= total) {
         const final = pool[Math.floor(Math.random() * pool.length)]
         setCurrentSlot(final)
         setResult(final)
         setSpinPhase('result')
         setSpinning(false)
+      } else {
+        setTimeout(() => tick(i + 1), getDelay(i))
       }
-    }, 80)
+    }
+    tick(0)
   }
 
   const toggleProvider = (p) => {
@@ -120,22 +137,22 @@ function RandomizerTab({ slots, slotsLoading }) {
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="filters-row">
-          <div className="filter-group" style={{ position: 'relative' }}>
+          <div className="filter-group" style={{ position: 'relative' }} ref={providerRef}>
             <label>Provider</label>
             <button className="filter-select" style={{ textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setProviderOpen(o => !o)}>
               <span>{selectedProviders.length === 0 ? `All (${providers.length})` : `${selectedProviders.length} selected`}</span>
-              <span>▾</span>
+              <span style={{ transition: 'transform 0.2s', transform: providerOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
             </button>
             {providerOpen && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, background: '#0d1119', border: '1px solid rgba(255,190,0,0.2)', borderRadius: 8, minWidth: 240, maxHeight: 300, overflowY: 'auto', padding: 8 }}>
+              <div className="provider-dropdown">
                 <div style={{ display: 'flex', gap: 8, padding: '4px 4px 8px', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: 6 }}>
                   <button className="add-btn" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setSelectedProviders([...providers])}>Select All</button>
                   <button className="ghost-btn" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setSelectedProviders([])}>Clear All</button>
                 </div>
                 {providers.map(p => (
-                  <div key={p} onClick={() => toggleProvider(p)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', cursor: 'pointer', borderRadius: 6, background: selectedProviders.includes(p) ? 'rgba(255,190,0,0.1)' : 'transparent' }}>
-                    <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${selectedProviders.includes(p) ? 'var(--gold)' : 'rgba(255,255,255,0.3)'}`, background: selectedProviders.includes(p) ? 'var(--gold)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {selectedProviders.includes(p) && <span style={{ color: '#000', fontSize: 10, fontWeight: 700 }}>✓</span>}
+                  <div key={p} className={`provider-item ${selectedProviders.includes(p) ? 'selected' : ''}`} onClick={() => toggleProvider(p)}>
+                    <div className={`provider-checkbox ${selectedProviders.includes(p) ? 'checked' : ''}`}>
+                      {selectedProviders.includes(p) && <span style={{ color: '#000', fontSize: 9, fontWeight: 700 }}>✓</span>}
                     </div>
                     <span style={{ fontSize: 13 }}>{p}</span>
                   </div>
@@ -173,18 +190,20 @@ function RandomizerTab({ slots, slotsLoading }) {
       </div>
 
       {(spinPhase === 'spinning' || spinPhase === 'result') && currentSlot && (
-        <div className="result-card" style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+        <div className={`result-card ${spinPhase === 'result' ? 'result-final' : ''}`} style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
             {spinPhase === 'spinning' ? '🎰 Spinning...' : '🎯 Result'}
           </div>
-          <div className="result-name" style={{ fontSize: spinPhase === 'spinning' ? 22 : 30 }}>{currentSlot.name}</div>
-          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>{currentSlot.provider}</div>
+          <div className={`result-name slot-flip`} style={{ fontSize: spinPhase === 'spinning' ? 22 : 32 }}>
+            {currentSlot.name}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4, marginBottom: 4 }}>{currentSlot.provider}</div>
           {spinPhase === 'result' && (
             <div className="result-pills">
               <VolBadge v={currentSlot.volatility} />
               <span className="pill"><strong>Max Win</strong>{fmtK(currentSlot.max_win)}x</span>
               <span className="pill"><strong>RTP</strong>{currentSlot.rtp}%</span>
-              <span className="pill"><strong>Theme</strong>{currentSlot.theme}</span>
+              {currentSlot.theme && <span className="pill"><strong>Theme</strong>{currentSlot.theme}</span>}
             </div>
           )}
         </div>
@@ -196,7 +215,7 @@ function RandomizerTab({ slots, slotsLoading }) {
           <div className="empty-state"><span className="loading-pulse">Loading slots...</span></div>
         ) : (
           <div className="slots-grid">
-            {pool.slice(0, 200).map((s, i) => (
+            {pool.map((s, i) => (
               <div key={i} className="slot-card">
                 <span style={{ fontSize: 20 }}>🎰</span>
                 <div style={{ minWidth: 0 }}>
